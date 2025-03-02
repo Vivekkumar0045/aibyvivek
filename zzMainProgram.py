@@ -9,7 +9,7 @@ import shutil
 
 # Gemini-API Inititialization -----------------------------------------------------------------------------------------------------------------------
 
-GOOGLE_API_KEY = 'AIzaSyB2sW7s6q5rSCY5FBOTCrvjJZM2E2SHTds'
+GOOGLE_API_KEY = st.secrets["general"]["API_KEY"]
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest")
 model2 = genai.GenerativeModel(model_name="gemini-2.0-flash")
