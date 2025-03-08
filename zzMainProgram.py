@@ -189,6 +189,7 @@ def start(answerpath,quespath):
                         {a}
 
                         Check whether the answer is correct for given question . Give marks out of {full_marks[key]}.
+                        Check Whether answer is not so short for given full marks . Give marking accordingly.
                         give me the marks in the format - ///marks=marksobtained/// 
                         dont provide me anything other than this given format
 
