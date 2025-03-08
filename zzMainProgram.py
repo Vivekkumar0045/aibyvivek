@@ -232,7 +232,7 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
 
 def main():
-    st.title("AI ASSIGNMENT CHECKER - GDSC")
+    st.title("AI ASSIGNMENT CHECKER - Build With India")
     st.write("Upload two PDFs: one for answers and one for questions.")
     
     answer_file = st.file_uploader("Upload Answers PDF", type=["pdf"])
