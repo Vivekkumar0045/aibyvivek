@@ -11,7 +11,7 @@ import shutil
 
 GOOGLE_API_KEY = st.secrets["general"]["API_KEY"]
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest")
+model = genai.GenerativeModel(model_name="gemini-2.0-pro-exp")
 model2 = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
 # Functions Defined ---------------------------------------------------------------------------------------------------------------------
