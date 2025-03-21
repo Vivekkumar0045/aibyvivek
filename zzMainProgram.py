@@ -6,12 +6,12 @@ import time
 import ast
 import streamlit as st
 import shutil
-
+import pandas as pd
 # Gemini-API Inititialization -----------------------------------------------------------------------------------------------------------------------
 
 GOOGLE_API_KEY = st.secrets["general"]["API_KEY"]
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel(model_name="gemini-2.0-pro-exp")
+model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest")
 model2 = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
 # Functions Defined ---------------------------------------------------------------------------------------------------------------------
@@ -41,7 +41,16 @@ def split_pdf(input_pdf,folder_name):
 
 def text_extract(path):
     sample_file = genai.upload_file(path=path, display_name="screenshot")
-    response = model.generate_content([sample_file, "Extract text from the given pdf. Only provide me the text, don't write any other word."])
+    response = model.generate_content([sample_file, '''
+                            Extract all text from the provided PDF exactly as it appears, without any modifications.
+
+                            Do not autocorrect spellings, grammar, or calculations.
+                            Preserve all formatting, symbols, and errors as they are.
+                            If a fraction is written as "1/4" or a wrong answer is given, extract it exactly as written.
+                            safely check for question number in the left side of pdf as they may be written in small .        
+                            Only return the extracted text. Do not add any explanations, comments, or extra words.
+                                       
+                                       '''])
     print(response.text)
     return response.text
 
@@ -69,6 +78,9 @@ def mainFunction(folder_path,folder_name):
     if(folder_name=="TempQuesFolder"):
         Dict = qs_text_process(mainText)
         return Dict
+    if(folder_name=="ReferencePathFolder"):
+        Dict = ans_text_process(mainText)
+        return Dict
 
 def ans_text_process(text):
     response = model.generate_content( 
@@ -78,6 +90,8 @@ def ans_text_process(text):
     
     make this in form of a dictionary where key is question number.
     Do not leave any line of the answer as answers may be multiline.
+    if question number is denoted as ans1 , answer1 consider it as 1 include inly numericals in keys
+    example of questions numbers - 1,2,3,4,5,6,... (no decimal)
     
     only provide the dictionary nothing else
 
@@ -92,7 +106,7 @@ def ans_text_process(text):
     output = response_text[lower_limit:upper_limit+1]
     final_dict1 = ast.literal_eval(output)
     final_dict = convert_dict_to_str(final_dict1)
-    # print(final_dict)
+    print(final_dict)
     # print(output) 
     return final_dict
 
@@ -104,7 +118,7 @@ def qs_text_process(text):
 
         Extract only the questions from the given text and format them in a dictionary where the key is the question number and the value is the question. 
         Do not include any answers. 
-
+        if question number is denoted as q1 , ques1 consider it as 1 include inly numericals in keys
         Only provide the dictionary, nothing else."
         ''')   
     response_text = response.text  
@@ -117,7 +131,7 @@ def qs_text_process(text):
     output = response_text[lower_limit:upper_limit+1]
     final_dict1 = ast.literal_eval(output)
     final_dict = convert_dict_to_str(final_dict1)
-    # print(final_dict)
+    print(final_dict)
     # print(output) 
     return final_dict
 
@@ -132,6 +146,7 @@ def marks_text_process(path):
      example of such dictionary - 
     { 1: 3, 2: 5, 3: 3, 4: 3, 5: 5, 6: 3, 7: 10, 8: 3} 
     here keys are question numbers and values are extracted marks
+    if question number is denoted as q1 , ques1 consider it as 1 include inly numericals in keys
 
      Note - marks may be or may not be  given next to questions in form of simple numbers carefully extract . 
      don't write any other word than the dictionary **. 
@@ -149,6 +164,7 @@ def marks_text_process(path):
     output = response_text[lower_limit:upper_limit+1]
     final_dict1 = ast.literal_eval(output)
     final_dict = convert_dict_to_str(final_dict1)
+    
     return final_dict
 
 def convert_dict_values_to_int(input_dict):
@@ -164,13 +180,18 @@ def save_uploaded_file(uploaded_file, filename):
         f.write(uploaded_file.getbuffer())
     return file_path
 
+def cleanup_folders():
+    shutil.rmtree("TempAnsFolder", ignore_errors=True)
+    shutil.rmtree("TempQuesFolder", ignore_errors=True)
+    shutil.rmtree(UPLOAD_FOLDER, ignore_errors=True)
+
 def start(answerpath,quespath):
     ans = mainFunction(answerpath,"TempAnsFolder")
     ques = mainFunction(quespath,"TempQuesFolder")
     full_marks = marks_text_process(quespath)
     marks_obtained = {key: "NA" for key in full_marks}
     # marks_obtained = convert_dict_to_str()
-    st.write("-----------------------LOGS ENDED------------------------------")
+    st.markdown("<hr style='border: 1px solid #ddd;'>", unsafe_allow_html=True)
     for key in ques:  
         key_str = str(key)  
         if key_str in ans:  
@@ -181,6 +202,20 @@ def start(answerpath,quespath):
             st.write(q)
             st.write("Answer :")
             st.write(a)
+            criteria = model2.generate_content(
+                [
+                    f'''
+                    Question :
+                    {q}
+
+                    For Above Question Detect the type of question whether it is a logical , numerical , conceptual question and provide me a judging criteria 
+                    to check this question in 3 brief points like important concept , formuala , or any other you can use.
+                    Don't Provide me anything ohther than theese points.
+                    '''
+                ]
+            )
+            print(criteria.text)
+
             response = model2.generate_content(
                     [f'''Question : 
                         {q}
@@ -188,10 +223,21 @@ def start(answerpath,quespath):
                         Answer : 
                         {a}
 
-                        Check whether the answer is correct for given question . Give marks out of {full_marks[key]}.
-                        Check Whether answer is not so short for given full marks . Give marking accordingly.
+
+                        Check whether the answer is correct for given question based on theese criteria :
+                        {criteria}
+                        
+                        Importantly if there are multiple questions in a single question then if any part is missing or incorrect in answer then deduct significant marks accordingly
+                        if its a numerical question solve by your own then judge my answer . 
+
+
+                        Give marks out of {full_marks[key]} based on above criterias .
+                        if question is denoted as q1 , ques1 consider it as 1 include only numericals in keys
+
                         give me the marks in the format - ///marks=marksobtained/// 
-                        dont provide me anything other than this given format
+                    
+                        
+                        dont provide me anything other than this given format strictly.
 
                     ''']
 
@@ -204,6 +250,33 @@ def start(answerpath,quespath):
             st.write(marks_obtained[key])
             st.write("Full Marks :")
             st.write(full_marks[key])
+            responsek = model2.generate_content(
+                    [f'''Question : 
+                        {q}
+
+                        Answer : 
+                        {a}
+
+                        based on given question and answer . Give feedback on how do the answer can be improved :
+                        what points are missing 
+                        include grammatical and spelling errors in the answer text at end separately
+                        check whther any part of question is unattempted 
+
+                        Don't provide me anything other than this feedback . give brief (2-3 line) feedback in only one single para.
+                        strictly use this format :
+                        feedback text here
+
+                        Gramatical and Spelling Mistakes :
+                        write mistakes here
+
+
+                        
+
+                    ''']
+
+                    )
+            st.write("FeedBack :")
+            st.write(responsek.text)
             st.write("  ")
         else:
             # print(f"{key}: Key does not exist., 0 Marks")
@@ -225,34 +298,207 @@ def start(answerpath,quespath):
     # st.write(dictt)
     print(full_marks)
 
-# Usage  ------------------------------------------------------------------------------------------------------------------------------------
+    st.title("📜 Student Report Card")
+    total, max_total, attempted, percent, remarks = calculate_results(marks_obtained, full_marks)
+    st.subheader("📌 Individual Question Marks")
+    data = pd.DataFrame({
+        "Question": list(marks_obtained.keys()),
+        "Marks Obtained": [marks_obtained[q] for q in marks_obtained],
+        "Full Marks": [full_marks[q] for q in full_marks]
+    })
+    st.table(data)
 
-# start("answers2.pdf" , "Question.pdf")
+    st.subheader("📊 Summary")
+    st.write(f"**Total Marks Obtained:** {total} / {max_total}")
+    st.write(f"**Total Questions Attempted:** {attempted}")
+    st.write(f"**Percentage:** {percent:.2f}%")
+    st.write(f"**Remarks:** {remarks}")
+
+def start_with_reference(answerpath,quespath,refpath):
+    ans = mainFunction(answerpath,"TempAnsFolder")
+    ques = mainFunction(quespath,"TempQuesFolder")
+    teach = mainFunction(refpath,"ReferencePathFolder")
+    full_marks = marks_text_process(quespath)
+    marks_obtained = {key: "NA" for key in full_marks}
+    # marks_obtained = convert_dict_to_str()
+    st.markdown("<hr style='border: 1px solid #ddd;'>", unsafe_allow_html=True)
+    for key in ques:  
+        key_str = str(key)  
+        if key_str in ans:  
+            q = ques[key]  
+            a = ans[key_str]
+            t = teach[key]  
+            # print(q, "\n\n", a, "\n\n")
+            st.write("Question :")
+            st.write(q)
+            st.write("Answer :")
+            st.write(a)
+            
+
+            response = model2.generate_content(
+                    [f'''Question : 
+                        {q}
+
+                        Answer : 
+                        {a}
+
+
+                        correct answer or teacher answer :
+                        {t}
+                        
+                        
+                        Importantly if there are multiple questions in a single question then if any part is missing or incorrect in answer then deduct significant marks accordingly
+
+                        check my answer based on teachers answer and give marks accordingly.
+                        Give marks out of {full_marks[key]} based on above criterias .
+                        if question is denoted as q1 , ques1 consider it as 1 include only numericals in keys
+
+                        give me the marks in the format - ///marks=marksobtained/// 
+                    
+                        
+                        dont provide me anything other than this given format strictly.
+
+                    ''']
+
+                    )
+            data_string = response.text.strip("/") 
+            _, marks_value = data_string.split("=") 
+            marks_value = marks_value.strip("///\n")  
+            marks_obtained[key] = int(marks_value) if marks_value.isdigit() else marks_value
+            st.write("Marks Obtained :")
+            st.write(marks_obtained[key])
+            st.write("Full Marks :")
+            st.write(full_marks[key])
+            responsek = model2.generate_content(
+                    [f'''Question : 
+                        {q}
+
+                        Answer : 
+                        {a}
+
+                        Teachers Answer :
+                        {t}
+
+
+                        based on given question and answer and teachers answer . Give feedback on how do the answer can be improved by validatw using teachers answer points :
+                        what points are missing 
+                        include grammatical and spelling errors in the answer text at end separately
+                        check whther any part of question is unattempted 
+
+                        Don't provide me anything other than this feedback . give brief (2-3 line) feedback in only one single para.
+                        strictly use this format :
+                        feedback text here
+
+                        Gramatical and Spelling Mistakes :
+                        write mistakes here
+
+
+                        
+
+                    ''']
+
+                    )
+            st.write("FeedBack :")
+            st.write(responsek.text)
+            st.write("  ")
+        else:
+            # print(f"{key}: Key does not exist., 0 Marks")
+            qu = ques[key]
+            st.write("Question :")
+            st.write(qu)
+            st.write("Answer :")
+            st.write("Question Not Attempted by Candidate ")
+            st.write("Marks Obtained :")
+            st.write("0")
+            st.write("Full Marks :")
+            st.write(full_marks[key])
+            st.write("  ")
+            
+            continue
+    # dictt = convert_dict_values_to_int(marks_obtained)  
+    # print(dictt)
+    print(marks_obtained)
+    # st.write(dictt)
+    print(full_marks)
+
+    st.title("📜 Student Report Card")
+    total, max_total, attempted, percent, remarks = calculate_results(marks_obtained, full_marks)
+    st.subheader("📌 Individual Question Marks")
+    data = pd.DataFrame({
+        "Question": list(marks_obtained.keys()),
+        "Marks Obtained": [marks_obtained[q] for q in marks_obtained],
+        "Full Marks": [full_marks[q] for q in full_marks]
+    })
+    st.table(data)
+
+    st.subheader("📊 Summary")
+    st.write(f"**Total Marks Obtained:** {total} / {max_total}")
+    st.write(f"**Total Questions Attempted:** {attempted}")
+    st.write(f"**Percentage:** {percent:.2f}%")
+    st.write(f"**Remarks:** {remarks}")
+
+def calculate_results(obtained, full):
+    total_marks = sum(float(obtained[q]) for q in obtained if obtained[q] != 'NA')
+    max_marks = sum(float(full[q]) for q in full)
+    attempted_questions = sum(1 for q in obtained if obtained[q] != 'NA')
+    percentage = (total_marks / max_marks) * 100 if max_marks > 0 else 0
+    
+    if percentage >= 90:
+        remarks = "Outstanding"
+    elif percentage >= 75:
+        remarks = "Good"
+    elif percentage >= 50:
+        remarks = "Average"
+    else:
+        remarks = "Poor"
+    
+    return total_marks, max_marks, attempted_questions, percentage, remarks
+
+
+# Usage  ------------------------------------------------------------------------------------------------------------------------------------
 
 UPLOAD_FOLDER = "uploads" 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
 
 def main():
-    st.title("AI ASSIGNMENT CHECKER - Build With India")
-    st.write("Upload two PDFs: one for answers and one for questions.")
+
+    st.markdown("<h1 style='text-align: center; color: #4CAF50;'>MarkBack AI</h1>", unsafe_allow_html=True)
+    st.write("### Upload Required PDFs Here for Evaluation:")
+    st.markdown("<hr style='border: 1px solid #ddd;'>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
     
-    answer_file = st.file_uploader("Upload Answers PDF", type=["pdf"])
-    question_file = st.file_uploader("Upload Questions PDF", type=["pdf"])
-    st.write("-----------------------LOGS------------------------------")
+    with col1:
+        st.subheader("Select Checking Method:")
+        check_type = st.radio("", ["AI Checking", "Reference Book"], horizontal=True)
+
+    with col2:
+        st.subheader("Upload PDFs:")
+        answer_file = st.file_uploader("Upload Answers PDF", type=["pdf"])
+        question_file = st.file_uploader("Upload Questions PDF", type=["pdf"])
+    
+    correct_file = None
+    if check_type == "Reference Book":
+        correct_file = st.file_uploader("Upload Reference Book / Teacher's Answer PDF", type=["pdf"])
+
+    st.markdown("<hr style='border: 1px solid #ddd;'>", unsafe_allow_html=True)
+    st.subheader("📜 Logs")
+
     if answer_file and question_file:
         ans_path = save_uploaded_file(answer_file, "answers.pdf")
         ques_path = save_uploaded_file(question_file, "questions.pdf")
 
-        st.success(f"Files saved  in Dir -- `{UPLOAD_FOLDER}/`")
-        st.write("Processing files...")
-        
-        start(ans_path, ques_path)
-        shutil.rmtree("TempAnsFolder")
-        shutil.rmtree("TempQuesFolder")
-        shutil.rmtree("uploads")
+        st.success(f"✅ Files saved in `{UPLOAD_FOLDER}/`")
+        st.write("🔄 Processing files...")
+
+        if check_type == "AI Checking":
+            start(ans_path, ques_path)
+        elif check_type == "Reference Book" and correct_file:
+            ref_path = save_uploaded_file(correct_file, "reference.pdf")
+            start_with_reference(ans_path, ques_path, ref_path)
+
+        cleanup_folders()
 
 if __name__ == "__main__":
     main()
-
-
 
